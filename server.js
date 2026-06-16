@@ -3,14 +3,9 @@ const cors = require("cors");
 
 const app = express();
 app.use(express.json());
-
-// Allow requests from your WordPress site
-// Replace "https://yourwebsite.com" with your actual website URL
 app.use(cors({ origin: "*" }));
 
-// ---- PASTE YOUR ANTHROPIC API KEY BELOW ----
-const ANTHROPIC_API_KEY = "YOUR_ANTHROPIC_API_KEY_HERE";
-// --------------------------------------------
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 const MODES = {
   doubt: `You are an expert tutor for Indian competitive government exams including UPSC Civil Services, IB (Intelligence Bureau), High Court exams, SSC, and State PSC exams. Answer student doubts clearly and accurately. Use relevant examples from Indian governance, history, polity, economy, and current affairs. Be encouraging and educational. Keep answers concise but complete.`,
@@ -30,28 +25,30 @@ Be constructive and specific. Start your response with "Score: X/10" on the firs
 
 app.post("/chat", async (req, res) => {
   const { messages, mode } = req.body;
-
   if (!messages || !mode) {
     return res.status(400).json({ error: "Missing messages or mode" });
   }
 
   const systemPrompt = MODES[mode] || MODES.doubt;
 
+  // Convert messages to Gemini format
+  const geminiMessages = messages.map(m => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content }]
+  }));
+
   try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1000,
-        system: systemPrompt,
-        messages: messages,
-      }),
-    });
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents: geminiMessages,
+        }),
+      }
+    );
 
     const data = await response.json();
 
@@ -59,10 +56,10 @@ app.post("/chat", async (req, res) => {
       return res.status(500).json({ error: data.error.message });
     }
 
-    const reply = data.content?.[0]?.text || "Sorry, no response generated.";
+    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, no response generated.";
     res.json({ reply });
   } catch (err) {
-    console.error("API error:", err);
+    console.error("Gemini API error:", err);
     res.status(500).json({ error: "Failed to contact AI. Please try again." });
   }
 });
